@@ -73,6 +73,8 @@
             }
 
             if (data.type === 'START') {
+                // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: принудительно берем цвет, который прислал сервер!
+                myColor = data.color; 
                 isMyTurn = data.turn;
                 statusDiv.innerText = data.message;
             }
@@ -93,7 +95,7 @@
 
             if (data.type === 'GAMEOVER') {
                 alert(data.message);
-                location.reload(); // Перезапуск страницы для новой игры
+                location.reload();
             }
         };
 
