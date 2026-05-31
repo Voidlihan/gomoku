@@ -38,8 +38,13 @@
     <script>
         // Подключаемся к локальному Node.js серверу
         // Автоматически определяет протокол (ws или wss) и хост текущего сайта
+        // Автоматически выбираем протокол: wss:// для https (Render) и ws:// для http (Localhost)
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const socket = new WebSocket(`${protocol}//${window.location.host}`);
+
+        // Если мы на Render, берем адрес хоста из браузера. Если тестируем локально, подключаемся к порту 8080
+        const host = window.location.hostname === 'localhost' ? 'localhost:8080' : window.location.host;
+
+        const socket = new WebSocket(`${protocol}//${host}`);
         
         let myColor = null;
         let isMyTurn = false;
@@ -64,29 +69,31 @@
 
             if (data.type === 'INIT') {
                 myColor = data.color;
-                statusDiv.innerText = `You are Player: ${myColor.toUpperCase()}. Waiting for opponent...`;
+                statusDiv.innerText = `Вы игрок: ${myColor.toUpperCase()}. Ожидание соперника...`;
             }
 
             if (data.type === 'START') {
-                isMyTurn = (data.turn === myColor);
-                statusDiv.innerText = isMyTurn ? "Your turn!" : "Opponent's turn...";
+                isMyTurn = data.turn;
+                statusDiv.innerText = data.message;
             }
 
             if (data.type === 'UPDATE') {
                 const cell = document.querySelector(`[data-row='${data.row}'][data-col='${data.col}']`);
-                cell.classList.add(data.color); // Рисуем камень (черный или белый)
-                
-                isMyTurn = (data.nextTurn === myColor);
-                statusDiv.innerText = isMyTurn ? "Your turn!" : "Opponent's turn...";
+                cell.classList.add(data.color);
             }
 
-            if (data.type === 'INVALID') {
-                alert(data.reason);
+            if (data.type === 'YOUR_TURN') {
+                isMyTurn = true;
+                statusDiv.innerText = "Ваш ход!";
             }
 
-            if (data.type === 'RESET') {
+            if (data.type === 'ERROR') {
                 alert(data.message);
-                location.reload(); // Перезагружаем страницу для очистки поля
+            }
+
+            if (data.type === 'GAMEOVER') {
+                alert(data.message);
+                location.reload(); // Перезапуск страницы для новой игры
             }
         };
 

@@ -41,91 +41,89 @@ function checkWin(board, row, col, player) {
 
 // --- Логика подключений через Веб-сокеты ---
 wss.on('connection', (ws) => {
-    console.log('Новый игрок подключился');
+    let players = []; // Будем использовать простой массив для надежности теста в облаке
+    let board = Array(10).fill(0).map(() => Array(10).fill(0));
+    let currentTurn = 0; // 0 - black, 1 - white
 
-    if (!waitingPlayer) {
-        waitingPlayer = ws;
-        ws.send(JSON.stringify({ type: 'WAITING', message: 'Ожидание соперника...' }));
-    } else {
-        const player1 = waitingPlayer;
-        const player2 = ws;
-        waitingPlayer = null;
+    wss.on('connection', (ws) => {
+        console.log('Новое подключение к веб-сокету');
 
-        const gameId = Date.now().toString();
-        const gameState = {
-            id: gameId,
-            players: [player1, player2],
-            board: Array(10).fill(0).map(() => Array(10).fill(0)),
-            turn: 0 // 0 - Черные (Player 1), 1 - Белые (Player 2)
-        };
-
-        games.set(player1, gameState);
-        games.set(player2, gameState);
-
-        player1.send(JSON.stringify({ type: 'START', color: 'black', turn: true, message: 'Игра началась! Ваш ход (Черные)' }));
-        player2.send(JSON.stringify({ type: 'START', color: 'white', turn: false, message: 'Игра началась! Ход соперника (Белые)' }));
-    }
-
-    ws.on('message', (message) => {
-        try {
-            const data = JSON.parse(message);
-            const game = games.get(ws);
-
-            if (!game && data.type === 'MOVE') return;
-
-            if (data.type === 'MOVE') {
-                const playerIndex = game.players.indexOf(ws);
-                if (playerIndex !== game.turn) {
-                    ws.send(JSON.stringify({ type: 'ERROR', message: 'Сейчас не ваш ход!' }));
-                    return;
-                }
-
-                const { row, col } = data;
-                if (game.board[row][col] !== 0) {
-                    ws.send(JSON.stringify({ type: 'ERROR', message: 'Клетка уже занята!' }));
-                    return;
-                }
-
-                const playerColor = playerIndex === 0 ? 1 : 2;
-                game.board[row][col] = playerColor;
-
-                // Рассылаем обновление обоим игрокам
-                game.players.forEach((p) => {
-                    p.send(JSON.stringify({ type: 'UPDATE', row, col, color: playerIndex === 0 ? 'black' : 'white' }));
-                });
-
-                // Проверяем победу
-                if (checkWin(game.board, row, col, playerColor)) {
-                    game.players.forEach((p) => {
-                        p.send(JSON.stringify({ type: 'GAMEOVER', winner: playerIndex === 0 ? 'black' : 'white', message: playerIndex === 0 ? 'Черные победили!' : 'Белые победили!' }));
-                    });
-                    games.delete(game.players[0]);
-                    games.delete(game.players[1]);
-                    return;
-                }
-
-                // Передаем ход
-                game.turn = game.turn === 0 ? 1 : 0;
-                game.players[game.turn].send(JSON.stringify({ type: 'YOUR_TURN' }));
-            }
-        } catch (e) {
-            console.error('Ошибка обработки сообщения:', e);
+        if (players.length >= 2) {
+            ws.send(JSON.stringify({ type: 'ERROR', message: 'Комната полная!' }));
+            ws.close();
+            return;
         }
-    });
 
-    ws.on('close', () => {
-        console.log('Игрок отключился');
-        if (waitingPlayer === ws) waitingPlayer = null;
+        players.push(ws);
+        const playerColor = players.length === 1 ? 'black' : 'white';
         
-        const game = games.get(ws);
-        if (game) {
-            game.players.forEach((p) => {
-                if (p !== ws && p.readyState === ws.OPEN) {
-                    p.send(JSON.stringify({ type: 'GAMEOVER', message: 'Соперник покинул игру. Вы победили!' }));
-                }
-                games.delete(p);
-            });
+        // СРАЗУ отправляем цвет игроку, чтобы фронтенд отвис!
+        ws.send(JSON.stringify({ type: 'INIT', color: playerColor }));
+
+        // Если собралась пара — даем команду старта
+        if (players.length === 2) {
+            players[0].send(JSON.stringify({ type: 'START', turn: true, message: 'Игра началась! Ваш ход' }));
+            players[1].send(JSON.stringify({ type: 'START', turn: false, message: 'Игра началась! Ожидайте хода соперника' }));
         }
+
+        ws.on('message', (message) => {
+            try {
+                const data = JSON.parse(message);
+                const playerIndex = players.indexOf(ws);
+
+                if (data.type === 'MOVE') {
+                    if (playerIndex !== currentTurn) {
+                        ws.send(JSON.stringify({ type: 'ERROR', message: 'Сейчас не ваш ход!' }));
+                        return;
+                    }
+
+                    const { row, col } = data;
+                    if (board[row][col] !== 0) {
+                        ws.send(JSON.stringify({ type: 'ERROR', message: 'Клетка занята!' }));
+                        return;
+                    }
+
+                    const stone = playerIndex === 0 ? 1 : 2;
+                    board[row][col] = stone;
+
+                    // Рассылаем ход всем
+                    players.forEach(p => {
+                        if (p.readyState === ws.OPEN) {
+                            p.send(JSON.stringify({ type: 'UPDATE', row, col, color: playerIndex === 0 ? 'black' : 'white' }));
+                        }
+                    });
+
+                    // Проверка победы
+                    if (checkWin(board, row, col, stone)) {
+                        players.forEach(p => {
+                            p.send(JSON.stringify({ type: 'GAMEOVER', message: playerIndex === 0 ? 'Черные победили!' : 'Белые победили!' }));
+                        });
+                        // Сброс
+                        board = Array(10).fill(0).map(() => Array(10).fill(0));
+                        players = [];
+                        return;
+                    }
+
+                    // Смена хода
+                    currentTurn = currentTurn === 0 ? 1 : 0;
+                    players[currentTurn].send(JSON.stringify({ type: 'YOUR_TURN' }));
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        });
+
+        ws.on('close', () => {
+            players = players.filter(p => p !== ws);
+            board = Array(10).fill(0).map(() => Array(10).fill(0));
+            currentTurn = 0;
+            players.forEach(p => {
+                if (p.readyState === ws.OPEN) {
+                    p.send(JSON.stringify({ type: 'GAMEOVER', message: 'Соперник отключился. Игра сброшена.' }));
+                }
+            });
+            players = [];
+        });
     });
 });
 
