@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GoMoKu Game</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
+        #status { font-size: 20px; margin: 10px; font-weight: bold; }
+        #board { 
+            display: grid; 
+            grid-template-columns: repeat(10, 40px); 
+            grid-template-rows: repeat(10, 40px); 
+            gap: 2px; 
+            justify-content: center; 
+            margin-top: 20px;
+        }
+        .cell { 
+            width: 40px; 
+            height: 40px; 
+            background-color: #e0ae6e; /* Цвет деревянной доски */
+            border: 1px solid #8b5a2b; 
+            font-size: 24px; 
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .cell.black::after { content: "⚫"; }
+        .cell.white::after { content: "⚪"; }
+    </style>
+</head>
+<body>
+
+    <h1>GoMoKu (Connect 5)</h1>
+    <div id="status">Connecting to server...</div>
+    <div id="board"></div>
+
+    <script>
+        // Подключаемся к локальному Node.js серверу
+        // Автоматически определяет протокол (ws или wss) и хост текущего сайта
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const socket = new WebSocket(`${protocol}//${window.location.host}`);
+        
+        let myColor = null;
+        let isMyTurn = false;
+        const statusDiv = document.getElementById('status');
+        const boardDiv = document.getElementById('board');
+
+        // Генерируем сетку 10x10
+        for (let r = 0; r < 10; r++) {
+            for (let c = 0; c < 10; c++) {
+                const cell = document.createElement('div');
+                cell.classList.add('cell');
+                cell.dataset.row = r;
+                cell.dataset.col = c;
+                cell.addEventListener('click', makeMove);
+                boardDiv.appendChild(cell);
+            }
+        }
+
+        // Слушаем сообщения от сервера
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'INIT') {
+                myColor = data.color;
+                statusDiv.innerText = `You are Player: ${myColor.toUpperCase()}. Waiting for opponent...`;
+            }
+
+            if (data.type === 'START') {
+                isMyTurn = (data.turn === myColor);
+                statusDiv.innerText = isMyTurn ? "Your turn!" : "Opponent's turn...";
+            }
+
+            if (data.type === 'UPDATE') {
+                const cell = document.querySelector(`[data-row='${data.row}'][data-col='${data.col}']`);
+                cell.classList.add(data.color); // Рисуем камень (черный или белый)
+                
+                isMyTurn = (data.nextTurn === myColor);
+                statusDiv.innerText = isMyTurn ? "Your turn!" : "Opponent's turn...";
+            }
+
+            if (data.type === 'INVALID') {
+                alert(data.reason);
+            }
+
+            if (data.type === 'RESET') {
+                alert(data.message);
+                location.reload(); // Перезагружаем страницу для очистки поля
+            }
+        };
+
+        function makeMove(e) {
+            if (!isMyTurn) {
+                alert("It is not your turn!");
+                return;
+            }
+            const row = e.target.dataset.row;
+            const col = e.target.dataset.col;
+
+            // Отправляем ход на сервер
+            socket.send(JSON.stringify({
+                type: 'MOVE',
+                row: parseInt(row),
+                col: parseInt(col),
+                color: myColor
+            }));
+        }
+    </script>
+</body>
+</html>
