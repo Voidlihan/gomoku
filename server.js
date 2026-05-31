@@ -1,21 +1,19 @@
 const express = require('express');
 const http = require('http');
-const { WebSocketServer } = require('ws');
+const { Server } = require('socket.io');
 const path = require('path');
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: { origin: "*" } // Разрешаем подключения с любых устройств
+});
+
 const port = process.env.PORT || 8080;
 
-// Указываем серверу отдавать статические файлы (index.html, картинки) из корневой папки
 app.use(express.static(path.join(__dirname, './')));
 
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
-
-let waitingPlayer = null;
-const games = new Map();
-
-// --- Твой алгоритм Гомоку (проверка победы) ---
+// --- Функция проверки победы (Гомоку) ---
 function checkWin(board, row, col, player) {
     const directions = [
         [[0, 1], [0, -1]],   // Горизонталь
@@ -39,129 +37,93 @@ function checkWin(board, row, col, player) {
     return false;
 }
 
-// --- Логика подключений через Веб-сокеты ---
-wss.on('connection', (ws) => {
-    let players = []; // Будем использовать простой массив для надежности теста в облаке
-    let board = Array(10).fill(0).map(() => Array(10).fill(0));
-    let currentTurn = 0; // 0 - black, 1 - white
+// Хранилище активных комнат
+const rooms = {};
 
-    let waitingPlayer = null; // Сюда сажаем игрока, который ждет пару
+io.on('connection', (socket) => {
+    console.log(`Подключился пользователь: ${socket.id}`);
 
-    wss.on('connection', (ws) => {
-        console.log('Новое подключение к веб-сокету');
+    // Ищем свободную комнату, где ждет один игрок
+    let roomId = Object.keys(rooms).find(id => rooms[id].players.length === 1);
 
-        // Если никто не ждет, текущий игрок становится ожидающим (Черным)
-        if (!waitingPlayer) {
-            waitingPlayer = ws;
-            ws.playerColor = 'black'; // Закрепляем цвет прямо в объекте сокета
-            ws.send(JSON.stringify({ type: 'INIT', color: 'black' }));
-            console.log('Игрок 1 подключился и ждет (Черные)');
-        } 
-        // Если кто-то уже ждет, создаем пару!
-        else {
-            const player1 = waitingPlayer; // Это Черный
-            const player2 = ws;            // Это Белый
-            waitingPlayer = null;          // Очищаем слот ожидания для следующих игроков
+    if (!roomId) {
+        // Создаем новую комнату, если все заняты
+        roomId = socket.id;
+        rooms[roomId] = {
+            players: [socket],
+            board: Array(10).fill(0).map(() => Array(10).fill(0)),
+            currentTurn: 0 // 0 - Черные, 1 - Белые
+        };
+        socket.join(roomId);
+        socket.roomId = roomId;
+        socket.color = 'black';
+        
+        socket.emit('init', { color: 'black', message: 'Вы Черные. Ожидание соперника...' });
+    } else {
+        // Добавляем второго игрока в найденную комнату
+        const room = rooms[roomId];
+        room.players.push(socket);
+        socket.join(roomId);
+        socket.roomId = roomId;
+        socket.color = 'white';
 
-            player2.playerColor = 'white'; // Закрепляем цвет за вторым сокетом
-            
-            // Связываем их друг с другом, чтобы сокеты знали своих оппонентов
-            player1.opponent = player2;
-            player2.opponent = player1;
+        socket.emit('init', { color: 'white', message: 'Вы Белые. Игра начинается!' });
 
-            // Создаем для этой пары чистую матрицу поля 10x10 прямо внутри их сессии
-            const gameBoard = Array(10).fill(0).map(() => Array(10).fill(0));
-            player1.board = gameBoard;
-            player2.board = gameBoard;
-            
-            // Переменная хода (true - ход этого игрока)
-            player1.isTurn = true;  // Черные ходят первыми
-            player2.isTurn = false; // Белые ждут
+        // Запускаем игру для ОБОИХ игроков в этой комнате
+        room.players[0].emit('start', { turn: true, message: 'Игра началась! Ваш ход (Черные)' });
+        room.players[1].emit('start', { turn: false, message: 'Игра началась! Ход соперника (Белые)' });
+    }
 
-            // Отправляем инициализацию Белому игроку
-            player2.send(JSON.stringify({ type: 'INIT', color: 'white' }));
+    // Обработка хода игрока
+    socket.on('move', (data) => {
+        const room = rooms[socket.roomId];
+        if (!room) return;
 
-            // Даем команду СТАРТ обоим игрокам
-            player1.send(JSON.stringify({ type: 'START', turn: true, message: 'Игра началась! Ваш ход (Черные)' }));
-            player2.send(JSON.stringify({ type: 'START', turn: false, message: 'Игра началась! Ход соперника (Белые)' }));
-            
-            console.log('Игрок 2 подключился. Игра запущена!');
+        const playerIndex = room.players.indexOf(socket);
+        
+        // Валидация: твой ли ход?
+        if (playerIndex !== room.currentTurn) {
+            socket.emit('error_msg', 'Сейчас не ваш ход!');
+            return;
         }
 
-        // Обработка ходов
-        ws.on('message', (message) => {
-            try {
-                const data = JSON.parse(message);
+        const { row, col } = data;
+        if (room.board[row][col] !== 0) {
+            socket.emit('error_msg', 'Клетка уже занята!');
+            return;
+        }
 
-                if (data.type === 'MOVE') {
-                    // 1. Проверяем, началась ли игра (есть ли оппонент)
-                    if (!ws.opponent) {
-                        ws.send(JSON.stringify({ type: 'ERROR', message: 'Игра еще не началась, нет соперника!' }));
-                        return;
-                    }
-                    // 2. Проверяем, его ли сейчас ход
-                    if (!ws.isTurn) {
-                        ws.send(JSON.stringify({ type: 'ERROR', message: 'Сейчас не ваш ход!' }));
-                        return;
-                    }
+        // Записываем ход (1 - черные, 2 - белые)
+        const stone = playerIndex === 0 ? 1 : 2;
+        room.board[row][col] = stone;
 
-                    const { row, col } = data;
-                    // 3. Проверяем, свободна ли клетка
-                    if (ws.board[row][col] !== 0) {
-                        ws.send(JSON.stringify({ type: 'ERROR', message: 'Клетка уже занята!' }));
-                        return;
-                    }
+        // Отправляем обновление ВСЕМ в комнате
+        io.to(socket.roomId).emit('update', { row, col, color: socket.color });
 
-                    // Записываем ход (1 - черные, 2 - белые)
-                    const stoneType = ws.playerColor === 'black' ? 1 : 2;
-                    ws.board[row][col] = stoneType;
+        // Проверяем победу
+        if (checkWin(room.board, row, col, stone)) {
+            const winText = playerIndex === 0 ? 'Черные победили!' : 'Белые победили!';
+            io.to(socket.roomId).emit('gameover', winText);
+            delete rooms[socket.roomId]; // Удаляем комнату после игры
+            return;
+        }
 
-                    // Отправляем обновление обоим игрокам
-                    const updateMessage = JSON.stringify({ type: 'UPDATE', row, col, color: ws.playerColor });
-                    ws.send(updateMessage);
-                    ws.opponent.send(updateMessage);
+        // Передаем ход следующему
+        room.currentTurn = room.currentTurn === 0 ? 1 : 0;
+        room.players[room.currentTurn].emit('your_turn');
+    });
 
-                    // Проверяем победу (функция checkWin должна быть объявлена в файле выше)
-                    if (checkWin(ws.board, row, col, stoneType)) {
-                        const winMsg = ws.playerColor === 'black' ? 'Черные победили!' : 'Белые победили!';
-                        ws.send(JSON.stringify({ type: 'GAMEOVER', message: `Вы победили! ${winMsg}` }));
-                        ws.opponent.send(JSON.stringify({ type: 'GAMEOVER', message: `Вы проиграли! ${winMsg}` }));
-                        
-                        // Разрываем связи игры
-                        if(ws.opponent) ws.opponent.opponent = null;
-                        ws.opponent = null;
-                        return;
-                    }
-
-                    // Переключаем ход
-                    ws.isTurn = false;
-                    ws.opponent.isTurn = true;
-
-                    // Говорим оппоненту, что теперь его ход
-                    ws.opponent.send(JSON.stringify({ type: 'YOUR_TURN' }));
-                }
-            } catch (e) {
-                console.error('Ошибка сообщения:', e);
-            }
-        });
-
-        // Обработка отключения
-        ws.on('close', () => {
-            console.log(`Игрок (${ws.playerColor || 'Без цвета'}) отключился`);
-            
-            if (waitingPlayer === ws) {
-                waitingPlayer = null;
-            }
-
-            if (ws.opponent) {
-                ws.opponent.send(JSON.stringify({ type: 'GAMEOVER', message: 'Соперник покинул игру. Сессия закрыта.' }));
-                ws.opponent.opponent = null;
-            }
-        });
+    // Обработка отключения
+    socket.on('disconnect', () => {
+        console.log(`Пользователь отключился: ${socket.id}`);
+        const room = rooms[socket.roomId];
+        if (room) {
+            io.to(socket.roomId).emit('gameover', 'Соперник покинул игру. Сессия закрыта.');
+            delete rooms[socket.roomId];
+        }
     });
 });
 
-// Запуск сервера
 server.listen(port, () => {
-    console.log(`Сервер запущен на порту ${port}`);
+    console.log(`Сервер Socket.io запущен на порту ${port}`);
 });
