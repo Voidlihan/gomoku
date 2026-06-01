@@ -102,8 +102,12 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // Передаем ход следующему (0 - Черные, 1 - Белые)
         room.currentTurn = room.currentTurn === 0 ? 1 : 0;
-        room.players[room.currentTurn].emit('your_turn');
+
+        // Отправляем ОБОИМ игрокам событие смены хода
+        room.players[0].emit('turn_change', { turn: room.currentTurn === 0, msg: room.currentTurn === 0 ? "Your turn (Black)!" : "Opponents turn (White)..." });
+        room.players[1].emit('turn_change', { turn: room.currentTurn === 1, msg: room.currentTurn === 1 ? "Your turn (White)!" : "Opponents turn (Black)..." });
     });
 
 
