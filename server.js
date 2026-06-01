@@ -112,10 +112,18 @@ io.on('connection', (socket) => {
 
 
     socket.on('disconnect', () => {
-        console.log(`User left the game: ${socket.id}`);
+        console.log(`User disconnected: ${socket.id}`);
         const room = rooms[socket.roomId];
+        
         if (room) {
-            io.to(socket.roomId).emit('gameover', 'Opponent disconnected. Session is closed!');
+            io.to(socket.roomId).emit('gameover', 'Opponent left the game. Session restarting...');
+            
+            room.players.forEach(p => {
+                if (p.id !== socket.id) {
+                    p.disconnect(true);
+                }
+            });
+
             delete rooms[socket.roomId];
         }
     });
