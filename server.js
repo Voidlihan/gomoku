@@ -36,39 +36,39 @@ function checkWin(board, row, col, player) {
     return false;
 }
 
-const rooms = {};
-const activeTimers = {}; // Storage for server-side turn timeouts
+// Global storage for expires timestamps
+const roomTimeouts = {};
 
-// Function to handle turn timeouts on the server
 function resetRoomTimer(roomId) {
-    // Clear previous timer if it exists
     if (activeTimers[roomId]) {
         clearTimeout(activeTimers[roomId]);
     }
 
-    // Start a strict 60-second countdown
+    // Calculate absolute finish time (Current time + 60 seconds)
+    const expiresAt = Date.now() + 60000;
+    roomTimeouts[roomId] = expiresAt;
+
     activeTimers[roomId] = setTimeout(() => {
         const room = rooms[roomId];
         if (!room) return;
 
-        // The player whose turn it currently is loses due to timeout
         const losingPlayerIndex = room.currentTurn;
         const winningPlayerIndex = losingPlayerIndex === 0 ? 1 : 0;
-
         const loserColor = losingPlayerIndex === 0 ? 'Black' : 'White';
         const winnerColor = winningPlayerIndex === 0 ? 'Black' : 'White';
 
-        // Broadcast timeout gameover message
         io.to(roomId).emit('gameover', `Game Over! ${loserColor} ran out of time. ${winnerColor} wins!`);
-
-        // Disconnect remaining sockets to clean up the queue
+        
         room.players.forEach(p => p.disconnect(true));
-
-        // Clean up memory
         delete rooms[roomId];
         delete activeTimers[roomId];
-    }, 60000); // 60 seconds
+        delete roomTimeouts[roomId];
+    }, 60000);
+
+    return expiresAt;
 }
+
+
 
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
@@ -96,9 +96,11 @@ io.on('connection', (socket) => {
 
         socket.emit('init', { color: 'white', message: 'You are WHITE. Match is starting!' });
 
-        // Trigger initial match start
-        room.players[0].emit('start', { turn: true, message: 'Game started! Your turn (Black)' });
-        room.players[1].emit('start', { turn: false, message: 'Game started! Opponent\'s turn (Black)' });
+        const expiresAt = resetRoomTimer(roomId);
+
+        // Trigger initial match start with absolute timestamp
+        room.players[0].emit('start', { turn: true, expiresAt, message: 'Game started! Your turn (Black)' });
+        room.players[1].emit('start', { turn: false, expiresAt, message: 'Game started! Opponent\'s turn (Black)' });
         
         // Start the authoritative server timer for the first turn
         resetRoomTimer(roomId);
@@ -138,12 +140,12 @@ io.on('connection', (socket) => {
         // Switch turn
         room.currentTurn = room.currentTurn === 0 ? 1 : 0;
 
-        // Reset and restart the 60s countdown for the next turn
-        resetRoomTimer(socket.roomId);
+        // Reset timer and get absolute expiration timestamp
+        const expiresAt = resetRoomTimer(socket.roomId);
 
-        // Notify both clients about the turn change
-        room.players[0].emit('turn_change', { turn: room.currentTurn === 0, msg: room.currentTurn === 0 ? "Your turn (Black)!" : "Opponent's turn (White)..." });
-        room.players[1].emit('turn_change', { turn: room.currentTurn === 1, msg: room.currentTurn === 1 ? "Your turn (White)!" : "Opponent's turn (Black)..." });
+        // Notify both clients with the synchronized absolute timestamp
+        room.players[0].emit('turn_change', { turn: room.currentTurn === 0, expiresAt, msg: room.currentTurn === 0 ? "Your turn (Black)!" : "Opponent's turn (White)..." });
+        room.players[1].emit('turn_change', { turn: room.currentTurn === 1, expiresAt, msg: room.currentTurn === 1 ? "Your turn (White)!" : "Opponent's turn (Black)..." });
     });
 
     socket.on('disconnect', () => {

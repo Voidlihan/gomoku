@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Distributed Gomoku Architecture</title>
+    <title>Gomoku Multiplayer</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -111,26 +111,30 @@
             }
         }
 
-        // Function to run client-side visual ticks matching the server countdown
-        function startVisualTimer() {
+        // Dynamic synchronization mechanism based on server epoch timestamp
+        function startVisualTimer(expiresAt) {
             clearInterval(countdownInterval);
-            timeLeft = 60;
-            timerDiv.innerText = `Time: ${timeLeft}s`;
-            timerDiv.style.color = "#e74c3c"; // Reset alert color
 
-            countdownInterval = setInterval(() => {
-                timeLeft--;
+            function updateDisplay() {
+                // Calculate exact remaining time regardless of network transmission latency
+                const now = Date.now();
+                timeLeft = Math.ceil((expiresAt - now) / 1000);
+
                 if (timeLeft <= 0) {
                     clearInterval(countdownInterval);
                     timerDiv.innerText = "Time's up!";
                 } else {
                     timerDiv.innerText = `Time: ${timeLeft}s`;
-                    // Visual warning if under 15 seconds
                     if (timeLeft <= 15) {
                         timerDiv.style.color = "#c0392b";
+                    } else {
+                        timerDiv.style.color = "#e74c3c";
                     }
                 }
-            }, 1000);
+            }
+
+            updateDisplay(); // Run instantly on packet arrival
+            countdownInterval = setInterval(updateDisplay, 1000);
         }
 
         socket.on('init', (data) => {
@@ -141,7 +145,7 @@
         socket.on('start', (data) => {
             isMyTurn = data.turn;
             statusDiv.innerText = data.message;
-            startVisualTimer(); // Trigger UI timer on start
+            startVisualTimer(data.expiresAt); // Pass server-authoritative timestamp
         });
 
         socket.on('update', (data) => {
@@ -152,7 +156,7 @@
         socket.on('turn_change', (data) => {
             isMyTurn = data.turn;
             statusDiv.innerText = data.msg;
-            startVisualTimer(); // Reset and restart countdown on turn changes
+            startVisualTimer(data.expiresAt); // Sync countdown perfectly
         });
 
         socket.on('error_msg', (msg) => {
