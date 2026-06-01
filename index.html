@@ -111,30 +111,26 @@
             }
         }
 
-        // Dynamic synchronization mechanism based on server epoch timestamp
-        function startVisualTimer(expiresAt) {
+        // Function to run client-side visual ticks matching the server countdown
+        function startVisualTimer() {
             clearInterval(countdownInterval);
+            timeLeft = 60;
+            timerDiv.innerText = `Time: ${timeLeft}s`;
+            timerDiv.style.color = "#e74c3c"; // Reset alert color
 
-            function updateDisplay() {
-                // Calculate exact remaining time regardless of network transmission latency
-                const now = Date.now();
-                timeLeft = Math.ceil((expiresAt - now) / 1000);
-
+            countdownInterval = setInterval(() => {
+                timeLeft--;
                 if (timeLeft <= 0) {
                     clearInterval(countdownInterval);
                     timerDiv.innerText = "Time's up!";
                 } else {
                     timerDiv.innerText = `Time: ${timeLeft}s`;
+                    // Visual warning if under 15 seconds
                     if (timeLeft <= 15) {
                         timerDiv.style.color = "#c0392b";
-                    } else {
-                        timerDiv.style.color = "#e74c3c";
                     }
                 }
-            }
-
-            updateDisplay(); // Run instantly on packet arrival
-            countdownInterval = setInterval(updateDisplay, 1000);
+            }, 1000);
         }
 
         socket.on('init', (data) => {
@@ -145,7 +141,7 @@
         socket.on('start', (data) => {
             isMyTurn = data.turn;
             statusDiv.innerText = data.message;
-            startVisualTimer(data.expiresAt); // Pass server-authoritative timestamp
+            startVisualTimer(); // Trigger UI timer on start
         });
 
         socket.on('update', (data) => {
@@ -156,7 +152,7 @@
         socket.on('turn_change', (data) => {
             isMyTurn = data.turn;
             statusDiv.innerText = data.msg;
-            startVisualTimer(data.expiresAt); // Sync countdown perfectly
+            startVisualTimer(); // Reset and restart countdown on turn changes
         });
 
         socket.on('error_msg', (msg) => {
