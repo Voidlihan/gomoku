@@ -9,17 +9,16 @@ const io = new Server(server, {
     cors: { origin: "*" }
 });
 
-const port = process.env.PORT || 8080;
+const port = process.env.PORT || 10000;
 
 app.use(express.static(path.join(__dirname, './')));
 
-
 function checkWin(board, row, col, player) {
     const directions = [
-        [[0, 1], [0, -1]],
-        [[1, 0], [-1, 0]],
-        [[1, 1], [-1, -1]],
-        [[1, -1], [-1, 1]] 
+        [[0, 1], [0, -1]],   // Horizontal
+        [[1, 0], [-1, 0]],   // Vertical
+        [[1, 1], [-1, -1]], // Diagonal ↘
+        [[1, -1], [-1, 1]]  // Diagonal ↙
     ];
     for (const dir of directions) {
         let count = 1;
@@ -37,12 +36,42 @@ function checkWin(board, row, col, player) {
     return false;
 }
 
-
 const rooms = {};
+const activeTimers = {}; // Storage for server-side turn timeouts
+
+// Function to handle turn timeouts on the server
+function resetRoomTimer(roomId) {
+    // Clear previous timer if it exists
+    if (activeTimers[roomId]) {
+        clearTimeout(activeTimers[roomId]);
+    }
+
+    // Start a strict 60-second countdown
+    activeTimers[roomId] = setTimeout(() => {
+        const room = rooms[roomId];
+        if (!room) return;
+
+        // The player whose turn it currently is loses due to timeout
+        const losingPlayerIndex = room.currentTurn;
+        const winningPlayerIndex = losingPlayerIndex === 0 ? 1 : 0;
+
+        const loserColor = losingPlayerIndex === 0 ? 'Black' : 'White';
+        const winnerColor = winningPlayerIndex === 0 ? 'Black' : 'White';
+
+        // Broadcast timeout gameover message
+        io.to(roomId).emit('gameover', `Game Over! ${loserColor} ran out of time. ${winnerColor} wins!`);
+
+        // Disconnect remaining sockets to clean up the queue
+        room.players.forEach(p => p.disconnect(true));
+
+        // Clean up memory
+        delete rooms[roomId];
+        delete activeTimers[roomId];
+    }, 60000); // 60 seconds
+}
 
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
-
 
     let roomId = Object.keys(rooms).find(id => rooms[id].players.length === 1);
 
@@ -51,13 +80,13 @@ io.on('connection', (socket) => {
         rooms[roomId] = {
             players: [socket],
             board: Array(10).fill(0).map(() => Array(10).fill(0)),
-            currentTurn: 0 
+            currentTurn: 0 // 0 - Black, 1 - White
         };
         socket.join(roomId);
         socket.roomId = roomId;
         socket.color = 'black';
         
-        socket.emit('init', { color: 'black', message: 'You`re black. Wait for opponent...' });
+        socket.emit('init', { color: 'black', message: 'You are BLACK. Waiting for an opponent...' });
     } else {
         const room = rooms[roomId];
         room.players.push(socket);
@@ -65,10 +94,14 @@ io.on('connection', (socket) => {
         socket.roomId = roomId;
         socket.color = 'white';
 
-        socket.emit('init', { color: 'white', message: 'You`re white, the game begins now!' });
+        socket.emit('init', { color: 'white', message: 'You are WHITE. Match is starting!' });
 
-        room.players[0].emit('start', { turn: true, message: 'The game has started! Your turn (Black)' });
-        room.players[1].emit('start', { turn: false, message: 'The game has started! Opponents turn (White)' });
+        // Trigger initial match start
+        room.players[0].emit('start', { turn: true, message: 'Game started! Your turn (Black)' });
+        room.players[1].emit('start', { turn: false, message: 'Game started! Opponent\'s turn (Black)' });
+        
+        // Start the authoritative server timer for the first turn
+        resetRoomTimer(roomId);
     }
 
     socket.on('move', (data) => {
@@ -78,49 +111,48 @@ io.on('connection', (socket) => {
         const playerIndex = room.players.indexOf(socket);
         
         if (playerIndex !== room.currentTurn) {
-            socket.emit('error_msg', 'Not your turn!');
+            socket.emit('error_msg', 'It is not your turn!');
             return;
         }
 
         const { row, col } = data;
         if (room.board[row][col] !== 0) {
-            socket.emit('error_msg', 'This square is already occupied!');
+            socket.emit('error_msg', 'This cell is already occupied!');
             return;
         }
-        
+
         const stone = playerIndex === 0 ? 1 : 2;
         room.board[row][col] = stone;
 
-
         io.to(socket.roomId).emit('update', { row, col, color: socket.color });
 
-
         if (checkWin(room.board, row, col, stone)) {
-            const winText = playerIndex === 0 ? 'Black wins!' : 'White wins!';
+            const winText = playerIndex === 0 ? 'Black wins the game!' : 'White wins the game!';
             io.to(socket.roomId).emit('gameover', winText);
-            delete rooms[socket.roomId]; 
+            if (activeTimers[socket.roomId]) clearTimeout(activeTimers[socket.roomId]);
+            room.players.forEach(p => p.disconnect(true));
+            delete rooms[socket.roomId];
             return;
         }
 
-        // Передаем ход следующему (0 - Черные, 1 - Белые)
+        // Switch turn
         room.currentTurn = room.currentTurn === 0 ? 1 : 0;
 
-        // Отправляем ОБОИМ игрокам событие смены хода
-        room.players[0].emit('turn_change', { turn: room.currentTurn === 0, msg: room.currentTurn === 0 ? "Your turn (Black)!" : "Opponents turn (White)..." });
-        room.players[1].emit('turn_change', { turn: room.currentTurn === 1, msg: room.currentTurn === 1 ? "Your turn (White)!" : "Opponents turn (Black)..." });
-    });
+        // Reset and restart the 60s countdown for the next turn
+        resetRoomTimer(socket.roomId);
 
-    socket.on('update', (data) => {
-        const cell = document.querySelector(`[data-row='${data.row}'][data-col='${data.col}']`);
-        if (cell) cell.classList.add(data.color);
+        // Notify both clients about the turn change
+        room.players[0].emit('turn_change', { turn: room.currentTurn === 0, msg: room.currentTurn === 0 ? "Your turn (Black)!" : "Opponent's turn (White)..." });
+        room.players[1].emit('turn_change', { turn: room.currentTurn === 1, msg: room.currentTurn === 1 ? "Your turn (White)!" : "Opponent's turn (Black)..." });
     });
 
     socket.on('disconnect', () => {
-        console.log(`User disconnected: ${socket.id}`);
+        console.log(`User left the game: ${socket.id}`);
         const room = rooms[socket.roomId];
         
         if (room) {
-            io.to(socket.roomId).emit('gameover', 'Opponent left the game. Session restarting...');
+            io.to(socket.roomId).emit('gameover', 'Your opponent left the game. Session closing...');
+            if (activeTimers[socket.roomId]) clearTimeout(activeTimers[socket.roomId]);
             
             room.players.forEach(p => {
                 if (p.id !== socket.id) {
@@ -131,14 +163,6 @@ io.on('connection', (socket) => {
             delete rooms[socket.roomId];
         }
     });
-    // socket.on('disconnect', () => {
-    //     console.log(`User left the game: ${socket.id}`);
-    //     const room = rooms[socket.roomId];
-    //     if (room) {
-    //         io.to(socket.roomId).emit('gameover', 'Opponent disconnected. Session is closed!');
-    //         delete rooms[socket.roomId];
-    //     }
-    // });
 });
 
 server.listen(port, () => {

@@ -2,44 +2,54 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>GoMoKu Game</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed Gomoku Architecture</title>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; background: #262626; color: rgb(212, 212, 212); }
-        #status { font-size: 20px; margin: 10px; font-weight: bold; }
-        /* #board { 
-            display: grid; 
-            grid-template-columns: repeat(10, 40px); 
-            grid-template-rows: repeat(10, 40px); 
-            gap: 2px; 
-            justify-content: center; 
-            margin-top: 20px;
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            text-align: center;
+            background-color: #f4f4f9;
+            color: #333;
+            margin: 0;
+            padding: 20px;
         }
-        .cell { 
-            width: 40px; 
-            height: 40px; 
-            background-color: #e0ae6e; 
-            border: 1px solid #8b5a2b; 
-            font-size: 24px; 
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 5px;
         }
-        .cell.black::after { content: "⚫"; }
-        .cell.white::after { content: "⚪"; } */
+        #status {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin: 10px auto;
+            min-height: 30px;
+            color: #16a085;
+        }
+        /* Style for our new visual countdown timer */
+        #timer {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #e74c3c;
+            margin: 5px auto 15px auto;
+            background: #fadbd8;
+            padding: 5px 15px;
+            border-radius: 20px;
+            display: inline-block;
+            min-width: 120px;
+            border: 1px solid #f5b7b1;
+        }
         #board {
             display: grid;
-            grid-template-columns: repeat(10, 40px); /* 10 колонок по 40px */
-            grid-template-rows: repeat(10, 40px);    /* 10 строк по 40px */
+            grid-template-columns: repeat(10, 40px);
+            grid-template-rows: repeat(10, 40px);
             gap: 1px;
-            background-image: url('background.gif'); /* Ставим фоновую текстуру */
+            background-image: url('background.gif');
             background-size: cover;
-            border: 2px solid #333;
-            width: 410px; /* 10 * 40px + немного на границы */
-            margin: 20px auto;
+            border: 3px solid #2c3e50;
+            width: 410px;
+            margin: 0 auto;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+            border-radius: 4px;
         }
-
-        /* Общие стили для ячеек */
         .cell {
             width: 40px;
             height: 40px;
@@ -47,20 +57,19 @@
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            /* Делаем легкую полупрозрачную сетку, чтобы видеть пересечения на фоне gif */
-            border: 1px solid rgba(0, 0, 0, 0.1); 
+            border: 1px solid rgba(0, 0, 0, 0.08);
             box-sizing: border-box;
+            transition: background-color 0.2s;
         }
-
-        /* Стиль для черного камня */
+        .cell:hover {
+            background-color: rgba(255, 255, 255, 0.15);
+        }
         .cell.black {
             background-image: url('blackStone.gif');
-            background-size: 85%; /* Камень занимает 85% ячейки, чтобы не сливаться краями */
+            background-size: 85%;
             background-repeat: no-repeat;
             background-position: center;
         }
-
-        /* Стиль для белого камня */
         .cell.white {
             background-image: url('whiteStone.gif');
             background-size: 85%;
@@ -71,78 +80,103 @@
 </head>
 <body>
 
-    <h1>GoMoKu (Connect 5)</h1>
-    <div id="status">Connecting to server...</div>
-    <br>
+    <h1>Gomoku Multiplayer</h1>
+    <div id="status">Connecting to server cluster...</div>
+    <div id="timer">Time: 60s</div>
     <div id="board"></div>
-    <h2>How to play?</h2>
-    <p>GoMoKu is a strategic board game where two players take turns placing their pieces on a 10x10 grid. The objective is to be the first to align five of your pieces in a row, either horizontally (----), vertically (|), or diagonally (/, \). Players must carefully plan their moves to block their opponent while trying to create their own winning line. The game requires foresight and tactical thinking, making it a fun and challenging experience for players of all ages.</p>
+
     <script src="/socket.io/socket.io.js"></script>
-<script>
-   
-    const socket = io();
+    <script>
+        const socket = io();
 
-    let myColor = null;
-    let isMyTurn = false;
-    const statusDiv = document.getElementById('status');
-    const boardDiv = document.getElementById('board');
+        let myColor = null;
+        let isMyTurn = false;
+        let countdownInterval = null;
+        let timeLeft = 60;
 
-    
-    for (let r = 0; r < 10; r++) {
-        for (let c = 0; c < 10; c++) {
-            const cell = document.createElement('div');
-            cell.classList.add('cell');
-            cell.dataset.row = r;
-            cell.dataset.col = c;
-            cell.addEventListener('click', makeMove);
-            boardDiv.appendChild(cell);
+        const statusDiv = document.getElementById('status');
+        const timerDiv = document.getElementById('timer');
+        const boardDiv = document.getElementById('board');
+
+        // Render the 10x10 board structure
+        for (let r = 0; r < 10; r++) {
+            for (let c = 0; c < 10; c++) {
+                const cell = document.createElement('div');
+                cell.classList.add('cell');
+                cell.dataset.row = r;
+                cell.dataset.col = c;
+                cell.addEventListener('click', makeMove);
+                boardDiv.appendChild(cell);
+            }
         }
-    }
 
-    
-    socket.on('init', (data) => {
-        myColor = data.color;
-        statusDiv.innerText = data.message;
-    });
+        // Function to run client-side visual ticks matching the server countdown
+        function startVisualTimer() {
+            clearInterval(countdownInterval);
+            timeLeft = 60;
+            timerDiv.innerText = `Time: ${timeLeft}s`;
+            timerDiv.style.color = "#e74c3c"; // Reset alert color
 
-    socket.on('start', (data) => {
-        isMyTurn = data.turn;
-        statusDiv.innerText = data.message;
-    });
-
-    socket.on('update', (data) => {
-        const cell = document.querySelector(`[data-row='${data.row}'][data-col='${data.col}']`);
-        if (cell) cell.classList.add(data.color);
-    });
-
-    socket.on('turn_change', (data) => {
-        isMyTurn = data.turn; // true или false
-        statusDiv.innerText = data.msg; // Динамический текст для каждого игрока
-    });
-
-    socket.on('error_msg', (msg) => {
-        alert(msg);
-    });
-
-    socket.on('gameover', (msg) => {
-        alert(msg);
-        location.reload();
-    });
-
-    function makeMove(e) {
-        if (!isMyTurn) {
-            alert("Wait for your turn!");
-            return;
+            countdownInterval = setInterval(() => {
+                timeLeft--;
+                if (timeLeft <= 0) {
+                    clearInterval(countdownInterval);
+                    timerDiv.innerText = "Time's up!";
+                } else {
+                    timerDiv.innerText = `Time: ${timeLeft}s`;
+                    // Visual warning if under 15 seconds
+                    if (timeLeft <= 15) {
+                        timerDiv.style.color = "#c0392b";
+                    }
+                }
+            }, 1000);
         }
-        const row = e.target.dataset.row;
-        const col = e.target.dataset.col;
 
-        // Отправляем ход на сервер через событие 'move'
-        socket.emit('move', {
-            row: parseInt(row),
-            col: parseInt(col)
+        socket.on('init', (data) => {
+            myColor = data.color;
+            statusDiv.innerText = data.message;
         });
-    }
-</script>
+
+        socket.on('start', (data) => {
+            isMyTurn = data.turn;
+            statusDiv.innerText = data.message;
+            startVisualTimer(); // Trigger UI timer on start
+        });
+
+        socket.on('update', (data) => {
+            const cell = document.querySelector(`[data-row='${data.row}'][data-col='${data.col}']`);
+            if (cell) cell.classList.add(data.color);
+        });
+
+        socket.on('turn_change', (data) => {
+            isMyTurn = data.turn;
+            statusDiv.innerText = data.msg;
+            startVisualTimer(); // Reset and restart countdown on turn changes
+        });
+
+        socket.on('error_msg', (msg) => {
+            alert(msg);
+        });
+
+        socket.on('gameover', (msg) => {
+            clearInterval(countdownInterval);
+            alert(msg);
+            location.reload();
+        });
+
+        function makeMove(e) {
+            if (!isMyTurn) {
+                alert("It is not your turn yet!");
+                return;
+            }
+            const row = e.target.dataset.row;
+            const col = e.target.dataset.col;
+
+            socket.emit('move', {
+                row: parseInt(row),
+                col: parseInt(col)
+            });
+        }
+    </script>
 </body>
 </html>
