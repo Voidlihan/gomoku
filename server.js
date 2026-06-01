@@ -53,10 +53,10 @@ function resetRoomTimer(roomId) {
         const losingPlayerIndex = room.currentTurn;
         const winningPlayerIndex = losingPlayerIndex === 0 ? 1 : 0;
 
-        const loserColor = losingPlayerIndex === 0 ? 'Black' : 'White';
-        const winnerColor = winningPlayerIndex === 0 ? 'White' : 'Black';
+        const loserName = room.players[losingPlayerIndex].username;
+        const winnerName = room.players[winningPlayerIndex].username;
 
-        io.to(roomId).emit('gameover', `Game Over! ${loserColor} ran out of time. ${winnerColor} wins!`);
+        io.to(roomId).emit('gameover', `Game Over! ${loserName} ran out of time. ${winnerName} wins!`);
 
         room.players.forEach(p => p.disconnect(true));
 
@@ -67,10 +67,19 @@ function resetRoomTimer(roomId) {
     return expiresAt;
 }
 
-io.on('connection', (socket) => {
-    console.log(`User connected: ${socket.id}`);
+// Middleware для защиты от ботов: отклоняем коннект, если имя не передано
+io.use((socket, next) => {
+    const username = socket.handshake.auth.username;
+    if (!username || username.trim() === "") {
+        return next(new Error("Authentication failed: Username is required"));
+    }
+    socket.username = username.trim();
+    next();
+});
 
-    // Handle Cristian's Algorithm time synchronization request
+io.on('connection', (socket) => {
+    console.log(`User connected: ${socket.username} (${socket.id})`);
+
     socket.on('ping_sync', (clientTimestamp) => {
         socket.emit('pong_sync', {
             clientTimestamp: clientTimestamp,
@@ -91,7 +100,7 @@ io.on('connection', (socket) => {
         socket.roomId = roomId;
         socket.color = 'black';
         
-        socket.emit('init', { color: 'black', message: 'You are BLACK. Waiting for an opponent...' });
+        socket.emit('init', { color: 'black', message: `Welcome ${socket.username}! You are BLACK. Waiting for an opponent...` });
     } else {
         const room = rooms[roomId];
         room.players.push(socket);
@@ -99,12 +108,15 @@ io.on('connection', (socket) => {
         socket.roomId = roomId;
         socket.color = 'white';
 
-        socket.emit('init', { color: 'white', message: 'You are WHITE. Match is starting!' });
+        socket.emit('init', { color: 'white', message: `Welcome ${socket.username}! You are WHITE. Match is starting!` });
 
         const expiresAt = resetRoomTimer(roomId);
 
-        room.players[0].emit('start', { turn: true, expiresAt, message: 'Game started! Your turn (Black)' });
-        room.players[1].emit('start', { turn: false, expiresAt, message: 'Game started! Opponent\'s turn (Black)' });
+        const p1 = room.players[0];
+        const p2 = room.players[1];
+
+        p1.emit('start', { turn: true, expiresAt, message: `Game started! Your turn, ${p1.username} (Black). Opponent: ${p2.username}` });
+        p2.emit('start', { turn: false, expiresAt, message: `Game started! ${p1.username}'s turn (Black). You are White.` });
     }
 
     socket.on('move', (data) => {
@@ -130,8 +142,7 @@ io.on('connection', (socket) => {
         io.to(socket.roomId).emit('update', { row, col, color: socket.color });
 
         if (checkWin(room.board, row, col, stone)) {
-            const winText = playerIndex === 0 ? 'Black wins the game!' : 'White wins the game!';
-            io.to(socket.roomId).emit('gameover', winText);
+            io.to(socket.roomId).emit('gameover', `Match over! ${socket.username} wins the game!`);
             if (activeTimers[socket.roomId]) clearTimeout(activeTimers[socket.roomId]);
             room.players.forEach(p => p.disconnect(true));
             delete rooms[socket.roomId];
@@ -141,16 +152,18 @@ io.on('connection', (socket) => {
         room.currentTurn = room.currentTurn === 0 ? 1 : 0;
         const expiresAt = resetRoomTimer(socket.roomId);
 
-        room.players[0].emit('turn_change', { turn: room.currentTurn === 0, expiresAt, msg: room.currentTurn === 0 ? "Your turn (Black)!" : "Opponent's turn (White)..." });
-        room.players[1].emit('turn_change', { turn: room.currentTurn === 1, expiresAt, msg: room.currentTurn === 1 ? "Your turn (White)!" : "Opponent's turn (Black)..." });
+        const nextPlayer = room.players[room.currentTurn];
+
+        room.players[0].emit('turn_change', { turn: room.currentTurn === 0, expiresAt, msg: room.currentTurn === 0 ? "Your turn!" : `${nextPlayer.username}'s turn...` });
+        room.players[1].emit('turn_change', { turn: room.currentTurn === 1, expiresAt, msg: room.currentTurn === 1 ? "Your turn!" : `${nextPlayer.username}'s turn...` });
     });
 
     socket.on('disconnect', () => {
-        console.log(`User left the game: ${socket.id}`);
+        console.log(`User left the game: ${socket.username}`);
         const room = rooms[socket.roomId];
         
         if (room) {
-            io.to(socket.roomId).emit('gameover', 'Your opponent left the game. Session closing...');
+            io.to(socket.roomId).emit('gameover', `Game over! ${socket.username} left the match. Session closing...`);
             if (activeTimers[socket.roomId]) clearTimeout(activeTimers[socket.roomId]);
             
             room.players.forEach(p => {

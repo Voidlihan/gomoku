@@ -75,12 +75,71 @@
             background-repeat: no-repeat;
             background-position: center;
         }
+
+        /* Стиль для экрана ввода имени (Защита от ботов) */
+        #auth-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(20, 20, 20, 0.95);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            transition: opacity 0.3s ease;
+        }
+        .auth-box {
+            background: #333;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            border: 1px solid #444;
+            width: 320px;
+        }
+        .auth-box h2 {
+            margin-top: 0;
+            color: #fff;
+        }
+        .auth-box input {
+            width: 100%;
+            padding: 10px;
+            margin: 15px 0;
+            border-radius: 5px;
+            border: 1px solid #555;
+            background: #222;
+            color: #fff;
+            box-sizing: border-box;
+            font-size: 1rem;
+        }
+        .auth-box button {
+            width: 100%;
+            padding: 12px;
+            background: #16a085;
+            border: none;
+            color: white;
+            font-size: 1rem;
+            font-weight: bold;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .auth-box button:hover {
+            background: #1abc9c;
+        }
     </style>
 </head>
 <body>
 
+    <div id="auth-overlay">
+        <div class="auth-box">
+            <h2>Welcome to Gomoku</h2>
+            <p style="color: #aaa; font-size: 0.9rem;">Please enter your name to prevent bot connections:</p>
+            <input type="text" id="username-input" placeholder="Your Nickname" maxlength="15" autocomplete="off">
+            <button id="join-btn">Join Game Cluster</button>
+        </div>
+    </div>
+
     <h1>Gomoku Multiplayer</h1>
-    <div id="status">Connecting to server cluster...</div>
+    <div id="status">Please enter your name first...</div>
     <div id="timer">Time: 60s</div>
     <div id="board"></div>
     <h2>How to play?</h2>
@@ -88,37 +147,21 @@
     
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
-
+        let socket = null;
         let myColor = null;
         let isMyTurn = false;
         let countdownInterval = null;
         let timeLeft = 60;
-        
-        // Cristian's Algorithm variables for time desynchronization corrections
         let clockOffset = 0; 
 
         const statusDiv = document.getElementById('status');
         const timerDiv = document.getElementById('timer');
         const boardDiv = document.getElementById('board');
+        const authOverlay = document.getElementById('auth-overlay');
+        const usernameInput = document.getElementById('username-input');
+        const joinBtn = document.getElementById('join-btn');
 
-        // Execute Cristian's algorithm on connection to calibrate system clocks
-        socket.on('connect', () => {
-            socket.emit('ping_sync', Date.now());
-        });
-
-        socket.on('pong_sync', (data) => {
-            const now = Date.now();
-            const rtt = now - data.clientTimestamp; // Round Trip Time (RTT)
-            
-            // Estimated authoritative server time = server time + half of network transit delay
-            const estimatedServerTime = data.serverTimestamp + (rtt / 2);
-            
-            // Calculate absolute difference between this machine's clock and the master server
-            clockOffset = estimatedServerTime - now;
-            console.log(`Clock synchronization complete. Local clock offset: ${clockOffset}ms, RTT: ${rtt}ms`);
-        });
-
+        // Создаем сетку игрового поля заранее
         for (let r = 0; r < 10; r++) {
             for (let c = 0; c < 10; c++) {
                 const cell = document.createElement('div');
@@ -130,13 +173,78 @@
             }
         }
 
+        // Обработчик кнопки входа
+        joinBtn.addEventListener('click', () => {
+            const name = usernameInput.value.trim();
+            if (!name) {
+                alert("Name cannot be empty!");
+                return;
+            }
+            
+            // Скрываем окно ввода
+            authOverlay.style.display = 'none';
+            statusDiv.innerText = "Connecting to server cluster...";
+
+            // Инициализируем соединение, передавая имя в параметрах авторизации (auth)
+            socket = io({
+                auth: { username: name }
+            });
+
+            setupSocketListeners();
+        });
+
+        function setupSocketListeners() {
+            // Синхронизация времени по алгоритму Христиана при коннекте
+            socket.on('connect', () => {
+                socket.emit('ping_sync', Date.now());
+            });
+
+            socket.on('pong_sync', (data) => {
+                const now = Date.now();
+                const rtt = now - data.clientTimestamp;
+                const estimatedServerTime = data.serverTimestamp + (rtt / 2);
+                clockOffset = estimatedServerTime - now;
+                console.log(`Clock sync done. Offset: ${clockOffset}ms, RTT: ${rtt}ms`);
+            });
+
+            socket.on('init', (data) => {
+                myColor = data.color;
+                statusDiv.innerText = data.message;
+            });
+
+            socket.on('start', (data) => {
+                isMyTurn = data.turn;
+                statusDiv.innerText = data.message;
+                startVisualTimer(data.expiresAt);
+            });
+
+            socket.on('update', (data) => {
+                const cell = document.querySelector(`[data-row='${data.row}'][data-col='${data.col}']`);
+                if (cell) cell.classList.add(data.color);
+            });
+
+            socket.on('turn_change', (data) => {
+                isMyTurn = data.turn;
+                statusDiv.innerText = data.msg;
+                startVisualTimer(data.expiresAt);
+            });
+
+            socket.on('error_msg', (msg) => {
+                alert(msg);
+            });
+
+            socket.on('gameover', (msg) => {
+                clearInterval(countdownInterval);
+                alert(msg);
+                location.reload();
+            });
+        }
+
         function startVisualTimer(expiresAt) {
             clearInterval(countdownInterval);
 
             function updateDisplay() {
                 const now = Date.now();
-                
-                // Adjust local hardware time using calculated clock offset to mimic server clock perfectly
                 const calibratedLocalTime = now + clockOffset;
                 timeLeft = Math.ceil((expiresAt - calibratedLocalTime) / 1000);
 
@@ -157,40 +265,8 @@
             countdownInterval = setInterval(updateDisplay, 1000);
         }
 
-        socket.on('init', (data) => {
-            myColor = data.color;
-            statusDiv.innerText = data.message;
-        });
-
-        socket.on('start', (data) => {
-            isMyTurn = data.turn;
-            statusDiv.innerText = data.message;
-            startVisualTimer(data.expiresAt);
-        });
-
-        socket.on('update', (data) => {
-            const cell = document.querySelector(`[data-row='${data.row}'][data-col='${data.col}']`);
-            if (cell) cell.classList.add(data.color);
-        });
-
-        socket.on('turn_change', (data) => {
-            isMyTurn = data.turn;
-            statusDiv.innerText = data.msg;
-            startVisualTimer(data.expiresAt);
-        });
-
-        socket.on('error_msg', (msg) => {
-            alert(msg);
-        });
-
-        socket.on('gameover', (msg) => {
-            clearInterval(countdownInterval);
-            alert(msg);
-            location.reload();
-        });
-
         function makeMove(e) {
-            if (!isMyTurn) {
+            if (!socket || !isMyTurn) {
                 alert("It is not your turn yet!");
                 return;
             }
