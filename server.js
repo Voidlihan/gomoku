@@ -37,37 +37,29 @@ function checkWin(board, row, col, player) {
 }
 
 const rooms = {};
-const activeTimers = {}; // Storage for server-side timeout pointers
+const activeTimers = {};
 
-// Function to handle authoritative turn timeouts on the server using absolute epoch milestones
 function resetRoomTimer(roomId) {
-    // Clear previous execution timer if it exists
     if (activeTimers[roomId]) {
         clearTimeout(activeTimers[roomId]);
     }
 
-    // Calculate absolute completion time milestone (Current server time + 60 seconds)
     const expiresAt = Date.now() + 60000;
 
-    // Start strict server countdown process
     activeTimers[roomId] = setTimeout(() => {
         const room = rooms[roomId];
         if (!room) return;
 
-        // The player whose turn it currently is loses due to timeout
         const losingPlayerIndex = room.currentTurn;
         const winningPlayerIndex = losingPlayerIndex === 0 ? 1 : 0;
 
         const loserColor = losingPlayerIndex === 0 ? 'Black' : 'White';
-        const winnerColor = winningPlayerIndex === 0 ? 'Black' : 'White';
+        const winnerColor = winningPlayerIndex === 0 ? 'White' : 'Black';
 
-        // Broadcast timeout gameover payload
         io.to(roomId).emit('gameover', `Game Over! ${loserColor} ran out of time. ${winnerColor} wins!`);
 
-        // Forcefully close connections to clear client queues cleanly
         room.players.forEach(p => p.disconnect(true));
 
-        // Wipe instance tracking to prevent memory leaks
         delete rooms[roomId];
         delete activeTimers[roomId];
     }, 60000);
@@ -78,6 +70,14 @@ function resetRoomTimer(roomId) {
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
+    // Handle Cristian's Algorithm time synchronization request
+    socket.on('ping_sync', (clientTimestamp) => {
+        socket.emit('pong_sync', {
+            clientTimestamp: clientTimestamp,
+            serverTimestamp: Date.now()
+        });
+    });
+
     let roomId = Object.keys(rooms).find(id => rooms[id].players.length === 1);
 
     if (!roomId) {
@@ -85,7 +85,7 @@ io.on('connection', (socket) => {
         rooms[roomId] = {
             players: [socket],
             board: Array(10).fill(0).map(() => Array(10).fill(0)),
-            currentTurn: 0 // 0 - Black, 1 - White
+            currentTurn: 0
         };
         socket.join(roomId);
         socket.roomId = roomId;
@@ -101,10 +101,8 @@ io.on('connection', (socket) => {
 
         socket.emit('init', { color: 'white', message: 'You are WHITE. Match is starting!' });
 
-        // Initialize authoritative round scheduling tracking absolute expiration epoch
         const expiresAt = resetRoomTimer(roomId);
 
-        // Trigger initial match start sending absolute timestamps to balance lag spikes
         room.players[0].emit('start', { turn: true, expiresAt, message: 'Game started! Your turn (Black)' });
         room.players[1].emit('start', { turn: false, expiresAt, message: 'Game started! Opponent\'s turn (Black)' });
     }
@@ -140,13 +138,9 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // Switch turn control index
         room.currentTurn = room.currentTurn === 0 ? 1 : 0;
-
-        // Reset tracking and capture new absolute epoch constraint for next round
         const expiresAt = resetRoomTimer(socket.roomId);
 
-        // Notify both node clients using the latency-proof target timestamp
         room.players[0].emit('turn_change', { turn: room.currentTurn === 0, expiresAt, msg: room.currentTurn === 0 ? "Your turn (Black)!" : "Opponent's turn (White)..." });
         room.players[1].emit('turn_change', { turn: room.currentTurn === 1, expiresAt, msg: room.currentTurn === 1 ? "Your turn (White)!" : "Opponent's turn (Black)..." });
     });
