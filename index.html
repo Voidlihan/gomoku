@@ -6,7 +6,7 @@
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
         #status { font-size: 20px; margin: 10px; font-weight: bold; }
-        #board { 
+        /* #board { 
             display: grid; 
             grid-template-columns: repeat(10, 40px); 
             grid-template-rows: repeat(10, 40px); 
@@ -26,7 +26,47 @@
             justify-content: center;
         }
         .cell.black::after { content: "⚫"; }
-        .cell.white::after { content: "⚪"; }
+        .cell.white::after { content: "⚪"; } */
+        #board {
+            display: grid;
+            grid-template-columns: repeat(10, 40px); /* 10 колонок по 40px */
+            grid-template-rows: repeat(10, 40px);    /* 10 строк по 40px */
+            gap: 1px;
+            background-image: url('background.gif'); /* Ставим фоновую текстуру */
+            background-size: cover;
+            border: 2px solid #333;
+            width: 410px; /* 10 * 40px + немного на границы */
+            margin: 20px auto;
+        }
+
+        /* Общие стили для ячеек */
+        .cell {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            /* Делаем легкую полупрозрачную сетку, чтобы видеть пересечения на фоне gif */
+            border: 1px solid rgba(0, 0, 0, 0.1); 
+            box-sizing: border-box;
+        }
+
+        /* Стиль для черного камня */
+        .cell.black {
+            background-image: url('blackStone.gif');
+            background-size: 85%; /* Камень занимает 85% ячейки, чтобы не сливаться краями */
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        /* Стиль для белого камня */
+        .cell.white {
+            background-image: url('whiteStone.gif');
+            background-size: 85%;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
     </style>
 </head>
 <body>

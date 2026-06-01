@@ -110,6 +110,10 @@ io.on('connection', (socket) => {
         room.players[1].emit('turn_change', { turn: room.currentTurn === 1, msg: room.currentTurn === 1 ? "Your turn (White)!" : "Opponents turn (Black)..." });
     });
 
+    socket.on('update', (data) => {
+        const cell = document.querySelector(`[data-row='${data.row}'][data-col='${data.col}']`);
+        if (cell) cell.classList.add(data.color); // Добавляет класс 'black' или 'white'
+    });
 
     socket.on('disconnect', () => {
         console.log(`User disconnected: ${socket.id}`);
@@ -127,6 +131,14 @@ io.on('connection', (socket) => {
             delete rooms[socket.roomId];
         }
     });
+    // socket.on('disconnect', () => {
+    //     console.log(`User left the game: ${socket.id}`);
+    //     const room = rooms[socket.roomId];
+    //     if (room) {
+    //         io.to(socket.roomId).emit('gameover', 'Opponent disconnected. Session is closed!');
+    //         delete rooms[socket.roomId];
+    //     }
+    // });
 });
 
 server.listen(port, () => {
