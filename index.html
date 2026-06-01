@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>GoMoKu Game</title>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
+        body { font-family: Arial, sans-serif; text-align: center; background: #262626; color: rgb(212, 212, 212); }
         #status { font-size: 20px; margin: 10px; font-weight: bold; }
         /* #board { 
             display: grid; 
@@ -73,8 +73,10 @@
 
     <h1>GoMoKu (Connect 5)</h1>
     <div id="status">Connecting to server...</div>
+    <br>
     <div id="board"></div>
-
+    <h2>How to play?</h2>
+    <p>GoMoKu is a strategic board game where two players take turns placing their pieces on a 10x10 grid. The objective is to be the first to align five of your pieces in a row, either horizontally (----), vertically (|), or diagonally (/, \). Players must carefully plan their moves to block their opponent while trying to create their own winning line. The game requires foresight and tactical thinking, making it a fun and challenging experience for players of all ages.</p>
     <script src="/socket.io/socket.io.js"></script>
 <script>
    

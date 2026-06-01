@@ -112,7 +112,7 @@ io.on('connection', (socket) => {
 
     socket.on('update', (data) => {
         const cell = document.querySelector(`[data-row='${data.row}'][data-col='${data.col}']`);
-        if (cell) cell.classList.add(data.color); // Добавляет класс 'black' или 'white'
+        if (cell) cell.classList.add(data.color);
     });
 
     socket.on('disconnect', () => {
