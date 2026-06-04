@@ -76,7 +76,6 @@
             background-position: center;
         }
 
-        /* Стиль для экрана ввода имени (Защита от ботов) */
         #auth-overlay {
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -132,9 +131,11 @@
     <div id="auth-overlay">
         <div class="auth-box">
             <h2>Welcome to Gomoku</h2>
-            <p style="color: #aaa; font-size: 0.9rem;">Please enter your name to prevent bot connections:</p>
+            <p style="color: #aaa; font-size: 0.9rem;">Please enter your name:</p>
             <input type="text" id="username-input" placeholder="Your Nickname" maxlength="15" autocomplete="off">
             <button id="join-btn">Join Game Cluster</button>
+            <h2>How to play?</h2>
+            <p>GoMoKu is a strategic board game where two players take turns placing their pieces on a 10x10 grid. The objective is to be the first to align five of your pieces in a row, either horizontally (----), vertically (|), or diagonally (/, \). Players must carefully plan their moves to block their opponent while trying to create their own winning line. The game requires foresight and tactical thinking, making it a fun and challenging experience for players of all ages.</p>
         </div>
     </div>
 
@@ -161,7 +162,6 @@
         const usernameInput = document.getElementById('username-input');
         const joinBtn = document.getElementById('join-btn');
 
-        // Создаем сетку игрового поля заранее
         for (let r = 0; r < 10; r++) {
             for (let c = 0; c < 10; c++) {
                 const cell = document.createElement('div');
@@ -173,7 +173,6 @@
             }
         }
 
-        // Обработчик кнопки входа
         joinBtn.addEventListener('click', () => {
             const name = usernameInput.value.trim();
             if (!name) {
@@ -181,11 +180,9 @@
                 return;
             }
             
-            // Скрываем окно ввода
             authOverlay.style.display = 'none';
             statusDiv.innerText = "Connecting to server cluster...";
 
-            // Инициализируем соединение, передавая имя в параметрах авторизации (auth)
             socket = io({
                 auth: { username: name }
             });
@@ -194,7 +191,6 @@
         });
 
         function setupSocketListeners() {
-            // Синхронизация времени по алгоритму Христиана при коннекте
             socket.on('connect', () => {
                 socket.emit('ping_sync', Date.now());
             });

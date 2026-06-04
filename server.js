@@ -67,7 +67,6 @@ function resetRoomTimer(roomId) {
     return expiresAt;
 }
 
-// Middleware для защиты от ботов: отклоняем коннект, если имя не передано
 io.use((socket, next) => {
     const username = socket.handshake.auth.username;
     if (!username || username.trim() === "") {
